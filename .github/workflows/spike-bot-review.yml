@@ -1,0 +1,27 @@
+name: Spike Bot Review
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull Request number
+        required: true
+        type: string
+
+permissions:
+  pull-requests: write
+
+jobs:
+  submit-bot-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Submit REQUEST_CHANGES review as github-actions[bot]
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api --method POST "/repos/${{ github.repository }}/pulls/${{ inputs.pr_number }}/reviews" \
+            -f event=REQUEST_CHANGES \
+            -f body="Bot review for WS1 dismissal test" \
+            | jq '{id, state, user: .user.login, commit_id}'
