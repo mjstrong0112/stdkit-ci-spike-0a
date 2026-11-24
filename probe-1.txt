@@ -1,1 +1,2 @@
 probe commit H1
+probe commit H2 (synchronize)
