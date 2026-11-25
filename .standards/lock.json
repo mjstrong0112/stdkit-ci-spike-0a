@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "tool": {
+    "minVersion": "0.1.0-rc.1"
+  },
+  "pack": {
+    "name": "team-standards",
+    "version": "0.1.0-rc.1",
+    "source": "team-standards",
+    "revision": "v0.1.0-rc.1",
+    "sha256": "3ee6a5b61d47b2be77f389e4e9a844c6e882decfb128571f0801f51eb72c9d70"
+  },
+  "profiles": [
+    {
+      "id": "ts-node-pnpm",
+      "root": ".",
+      "sources": "none",
+      "overlays": []
+    }
+  ],
+  "hosts": [
+    "antigravity",
+    "claude-code",
+    "codex"
+  ],
+  "mode": "team",
+  "defaultPhase": "warn",
+  "gates": {},
+  "files": {
+    "AGENTS.md": {
+      "template": "templates/AGENTS.md.hbs",
+      "hashScope": "sections",
+      "managedSections": [
+        "team-guidance"
+      ],
+      "sectionHashes": {
+        "team-guidance": "62d4db5254b020b48157c7f460c571ca774486e7da099ecce5a572a7d2af0e3b"
+      }
+    },
+    "CLAUDE.md": {
+      "template": "templates/CLAUDE.md",
+      "hashScope": "file",
+      "sha256": "336cc4fbf19beaada7ccf9986414fa91851a8d7a07dfb3ccbe800a69eed0ab49"
+    },
+    ".standards/answers.json": {
+      "template": ".standards/answers.json",
+      "hashScope": "file",
+      "sha256": "609b0270c380969286ce2be72aad387758e8169c221f93c3bb14a4b352c5e65c"
+    },
+    ".github/workflows/stdkit-policy.yml": {
+      "template": ".github/workflows/stdkit-policy.yml",
+      "hashScope": "file",
+      "sha256": "ad6302ac70b0374d18f1dac41b05157bab44d8e858857169d78aa4888b8da657"
+    }
+  }
+}
