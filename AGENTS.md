@@ -1,3 +1,5 @@
+# Displaced R0 header
+
 The code, tests, and checks are the source of truth. If this file disagrees with them, follow the code and checks, and flag the drift in your PR.
 
 # Agent guidance
