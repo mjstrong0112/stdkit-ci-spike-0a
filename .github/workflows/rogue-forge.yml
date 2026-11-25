@@ -1,0 +1,35 @@
+name: Rogue Publisher Forgery and Credential Isolation Probe
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  forge-check:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Forge same-name check via GITHUB_TOKEN (App 15368)
+        run: |
+          gh api --method POST "repos/$GH_REPO/check-runs" \
+            -f name='stdkit-policy / static-gate' \
+            -f head_sha="$HEAD_SHA" \
+            -f status=completed \
+            -f conclusion=success \
+            -f 'output[title]=Forged by GITHUB_TOKEN (App 15368)' \
+            -f 'output[summary]=Same-repo PR attempted to forge required check via generic GitHub Actions publisher.'
+
+  probe-env-isolation:
+    runs-on: ubuntu-latest
+    environment: stdkit-policy
+    steps:
+      - name: Should be rejected by main-only environment branch policy
+        run: |
+          echo "UNEXPECTED: PR workflow entered stdkit-policy environment"
+          exit 1
