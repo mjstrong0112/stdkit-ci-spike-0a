@@ -217,7 +217,7 @@ jobs:
             headSha: process.env.HEAD_SHA,
             baseSha: process.env.BASE_SHA,
             runId: Number(process.env.RUN_ID),
-            runAttempt: Number(process.env.RUN_ATTEMPT),
+            runAttempt: 1, // S8a stale attempt fixture
             profiles: ['ts-node-pnpm'],
             toolVersions: { node: process.version },
             counts,
