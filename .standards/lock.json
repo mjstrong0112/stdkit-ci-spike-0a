@@ -14,7 +14,7 @@
     {
       "id": "ts-node-pnpm",
       "root": ".",
-      "sources": "present",
+      "sources": "none",
       "overlays": []
     }
   ],
