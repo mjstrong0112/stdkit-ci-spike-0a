@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "tool": {
-    "minVersion": "0.1.0-rc.2"
+    "minVersion": "0.1.0-rc.3"
   },
   "pack": {
     "name": "team-standards",
-    "version": "0.1.0-rc.2",
+    "version": "0.1.0-rc.3",
     "source": "team-standards",
-    "revision": "v0.1.0-rc.2",
-    "sha256": "cbaeb18450e0bcdcaa1361a710e307a6042d22d148335f436544cec8c24f8dc1"
+    "revision": "v0.1.0-rc.3",
+    "sha256": "5d0aa833991a0bcebf8b55746cdd1471948f226cf3d23e55b0b205a9f95bd582"
   },
   "profiles": [
     {
@@ -37,7 +37,7 @@
         "team-guidance"
       ],
       "sectionHashes": {
-        "team-guidance": "62d4db5254b020b48157c7f460c571ca774486e7da099ecce5a572a7d2af0e3b"
+        "team-guidance": "ab7c435d604b4364ab5b030599b413c9b291af5baa6d7987ef88dc3a60d6bdb7"
       }
     },
     "CLAUDE.md": {
@@ -54,6 +54,16 @@
       "template": "templates/workflows/stdkit-policy.yml",
       "hashScope": "file",
       "sha256": "981cc0609119af8a769ec5d2b120afa658b0ad7285a02f5b58ad765f89d4db73"
+    },
+    ".github/workflows/stdkit-eval.yml": {
+      "template": "templates/workflows/stdkit-eval.yml",
+      "hashScope": "file",
+      "sha256": "42ee9e7c17c9123676c8738b095826907fac8ac7633f22f1d131f591b1244ef4"
+    },
+    ".github/workflows/quality.yml": {
+      "template": "templates/workflows/quality.yml",
+      "hashScope": "file",
+      "sha256": "54aa23fdb8b4570aaf4fe1242711b64444dcf0093317f4d0a2ccbd5ce730e779"
     },
     "scripts/agent-guard.mjs": {
       "template": "scripts/agent-guard.mjs",
@@ -96,16 +106,6 @@
       "template": ".codex/rules/stdkit.rules",
       "hashScope": "file",
       "sha256": "722e92eaaf93f894b9fd4d7b76e7d35e9a164aea632d8b92bddb0355c115407b"
-    },
-    ".github/workflows/stdkit-eval.yml": {
-      "template": "templates/workflows/stdkit-eval.yml",
-      "hashScope": "file",
-      "sha256": "42ee9e7c17c9123676c8738b095826907fac8ac7633f22f1d131f591b1244ef4"
-    },
-    ".github/workflows/quality.yml": {
-      "template": "templates/workflows/quality.yml",
-      "hashScope": "file",
-      "sha256": "31eaec844d77143480c3ace045f4d2eb22b7b0308633b7778cb10c3c24a1d352"
     }
   }
 }

@@ -7,6 +7,8 @@ Precedence: code and checks, then accepted ADRs, then this file, then plans and 
 <!-- stdkit:begin team-guidance -->
 ## Team standards
 
+Precedence follows code and checks, then accepted ADRs, then this file, then plans and tickets.
+
 - Trace the relevant behavior and choose the smallest complete change.
 - Validate inputs at trust boundaries and preserve the cause of errors.
 - For a bug fix or specified behavior, write a failing test first.
