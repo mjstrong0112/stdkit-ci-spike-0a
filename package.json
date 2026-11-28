@@ -3,9 +3,11 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.29.0",
-  "engines": { "node": ">=24.22.1 <25.0.0" },
+  "engines": {
+    "node": ">=24.22.1 <25.0.0"
+  },
   "scripts": {
-    "lint": "node --check src/message.ts",
+    "lint": "exit 2",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/message.test.mjs",
     "knip": "knip"
