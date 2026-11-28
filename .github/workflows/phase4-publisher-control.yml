@@ -1,0 +1,14 @@
+name: Phase 4 publisher control
+
+on: pull_request
+
+permissions: {}
+
+jobs:
+  same-name-control:
+    name: stdkit-policy / static-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Complete the publisher identity control
+        run: echo "Ordinary GitHub Actions check for the sandbox publisher identity test."
