@@ -1,0 +1,169 @@
+name: stdkit result evaluation
+
+# Split-trust Tier-2 evaluator validates workflow_run provenance and artifacts as untrusted data without checkout.
+on:
+  workflow_run: # zizmor: ignore[dangerous-triggers]
+    workflows: ["Quality Candidate"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number
+        required: true
+        type: number
+      workflow_id:
+        description: Candidate workflow ID
+        required: true
+        type: number
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stdkit-policy-eval-${{ github.event.workflow_run.id || inputs.pr }}
+  cancel-in-progress: true
+
+jobs:
+  evaluate:
+    if: >-
+      vars.STDKIT_POLICY_ENABLED == 'true' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    environment: stdkit-policy
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    env:
+      EVENT_NAME: ${{ github.event_name }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+      INPUT_PR: ${{ inputs.pr }}
+      INPUT_WORKFLOW_ID: ${{ inputs.workflow_id }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Set up trusted Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.22.1"
+          package-manager-cache: false
+
+      - name: Provision digest-pinned CLI and pack
+        env:
+          CLI_URL: ${{ vars.STDKIT_CLI_URL }}
+          CLI_SHA256: ${{ vars.STDKIT_CLI_SHA256 }}
+          PACK_URL: ${{ vars.STDKIT_PACK_URL }}
+          PACK_REF: ${{ vars.STDKIT_PACK_REF }}
+          PACK_SHA256: ${{ vars.STDKIT_PACK_SHA256 }}
+        run: |
+          [[ "$CLI_URL" == https://* ]] || exit 1
+          [[ "$CLI_SHA256" =~ ^[0-9a-f]{64}$ ]] || exit 1
+          [[ "$PACK_URL" == https://* ]] || exit 1
+          [[ "$PACK_REF" =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+$ ]] || exit 1
+          [[ "$PACK_SHA256" =~ ^[0-9a-f]{64}$ ]] || exit 1
+          mkdir -p "$RUNNER_TEMP/stdkit"
+          cd "$RUNNER_TEMP/stdkit"
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+            --connect-timeout 15 --max-time 60 --max-filesize 10485760 --output stdkit.mjs "$CLI_URL"
+          printf '%s  stdkit.mjs\n' "$CLI_SHA256" | sha256sum --check
+          pack_source=$(printf '%s' "$PACK_REF" | cut -d @ -f 1)
+          node stdkit.mjs fetch --cache-dir "$PWD/cache" \
+            --pack "$PACK_REF" --sha256 "$PACK_SHA256" \
+            --sources-config "$PWD/no-sources.yaml" \
+            --pack-source "$pack_source=$PACK_URL"
+
+      - name: Resolve default-branch PR and fetch bare Git objects
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$RUNNER_TEMP/stdkit"
+          pr_num="$INPUT_PR"
+          if [[ "$EVENT_NAME" == "workflow_run" ]]; then
+            [[ "$RUN_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
+            gh api "repos/$GH_REPO/actions/runs/$RUN_ID" > "$RUNNER_TEMP/run.json"
+            pr_num=$(jq -r 'if (.pull_requests | length) == 1 then .pull_requests[0].number else "" end' "$RUNNER_TEMP/run.json")
+            if [[ -z "$pr_num" ]]; then
+              run_head=$(jq -er '.head_sha | select(test("^[0-9a-f]{40}$"))' "$RUNNER_TEMP/run.json")
+              pr_num=$(gh api --paginate --slurp "repos/$GH_REPO/pulls?state=open&base=$DEFAULT_BRANCH&per_page=100" \
+                | jq -r --arg h "$run_head" '[add[] | select(.head.sha == $h) | .number] | if length == 1 then .[0] else "" end')
+            fi
+          fi
+          [[ "$pr_num" =~ ^[1-9][0-9]*$ ]] || exit 1
+
+          gh api "repos/$GH_REPO/pulls/$pr_num" > "$RUNNER_TEMP/pr.json"
+          state=$(jq -er '.state' "$RUNNER_TEMP/pr.json")
+          base_ref=$(jq -er '.base.ref' "$RUNNER_TEMP/pr.json")
+          base_repo=$(jq -er '.base.repo.full_name' "$RUNNER_TEMP/pr.json")
+          if [[ "$state" != "open" || "$base_ref" != "$DEFAULT_BRANCH" || "$base_repo" != "$GH_REPO" ]]; then
+            echo "Skipping evaluation: PR #$pr_num targets '$base_repo:$base_ref' (state=$state), not default branch '$DEFAULT_BRANCH'."
+            printf 'eligible=false\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          base=$(jq -er '.base.sha | select(test("^[0-9a-f]{40}$"))' "$RUNNER_TEMP/pr.json")
+          head=$(jq -er '.head.sha | select(test("^[0-9a-f]{40}$"))' "$RUNNER_TEMP/pr.json")
+
+          git init --bare --template= "$RUNNER_TEMP/stdkit/candidate.git"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          printf '::add-mask::%s\n' "$auth"
+          git -C "$RUNNER_TEMP/stdkit/candidate.git" -c "http.extraHeader=AUTHORIZATION: basic $auth" \
+            fetch --no-tags "https://github.com/$GH_REPO.git" \
+            "$base:refs/stdkit/base" "refs/pull/$pr_num/head:refs/stdkit/head"
+
+          {
+            printf 'eligible=true\n'
+            printf 'pr=%s\n' "$pr_num"
+            printf 'base=%s\n' "$base"
+            printf 'head=%s\n' "$head"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Mint dedicated publisher token
+        id: app
+        if: steps.target.outputs.eligible == 'true'
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          client-id: ${{ vars.STDKIT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.STDKIT_APP_PRIVATE_KEY }}
+          permission-checks: write
+
+      - name: Evaluate candidate measurements and publish App check
+        if: steps.target.outputs.eligible == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          STDKIT_APP_TOKEN: ${{ steps.app.outputs.token }}
+          PACK_REF: ${{ vars.STDKIT_PACK_REF }}
+          PACK_SHA256: ${{ vars.STDKIT_PACK_SHA256 }}
+          PR_NUM: ${{ steps.target.outputs.pr }}
+          BASE_SHA: ${{ steps.target.outputs.base }}
+          HEAD_SHA: ${{ steps.target.outputs.head }}
+        run: |
+          args=(doctor --ci --phase evaluate --base "$BASE_SHA" --head "$HEAD_SHA" --pr "$PR_NUM" --repo "$GH_REPO" \
+            --publish-check --cache-dir ../cache --pack "$PACK_REF" --sha256 "$PACK_SHA256" \
+            --report "$RUNNER_TEMP/stdkit-report.json" --summary "$GITHUB_STEP_SUMMARY" --json)
+          if [[ "$EVENT_NAME" == "workflow_run" ]]; then
+            args+=(--run-id "$RUN_ID")
+            if [[ "$RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]; then
+              args+=(--run-attempt "$RUN_ATTEMPT")
+            fi
+          else
+            [[ "$INPUT_WORKFLOW_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
+            args+=(--workflow-id "$INPUT_WORKFLOW_ID")
+          fi
+          cd "$RUNNER_TEMP/stdkit/candidate.git"
+          node ../stdkit.mjs "${args[@]}"
+
+      - name: Upload trusted evaluation report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: stdkit-report
+          path: ${{ runner.temp }}/stdkit-report.json
+          if-no-files-found: ignore
+          retention-days: 30

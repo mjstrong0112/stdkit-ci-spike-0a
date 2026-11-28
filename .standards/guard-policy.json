@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "minNodeVersion": "24.22.1",
+  "protectedBranches": [
+    "main",
+    "master",
+    "release/**"
+  ],
+  "secretGlobs": [
+    ".env*",
+    "*.pem",
+    "*.key"
+  ],
+  "trustSurfaces": [
+    ".standards/**",
+    "AGENTS.md",
+    "CLAUDE.md",
+    ".claude/settings.json",
+    ".codex/**",
+    ".agents/**",
+    "scripts/agent-guard.mjs",
+    ".github/workflows/**",
+    ".github/CODEOWNERS",
+    "quality-baseline.json",
+    "package.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    ".npmrc"
+  ],
+  "installCommands": [
+    "pnpm add",
+    "pnpm install",
+    "npm add",
+    "npm install",
+    "yarn add",
+    "yarn install"
+  ],
+  "denyPublishCommands": [
+    "npm publish",
+    "pnpm publish",
+    "yarn publish",
+    "yarn npm publish"
+  ]
+}

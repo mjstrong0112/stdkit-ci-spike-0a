@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "deny": [
+      "command(git commit --no-verify)",
+      "command(git commit -n)",
+      "command(git push --no-verify)",
+      "command(git push --mirror)",
+      "command(npm publish)",
+      "command(pnpm publish)",
+      "command(yarn publish)",
+      "command(yarn npm publish)",
+      "read_file(.env)"
+    ]
+  }
+}

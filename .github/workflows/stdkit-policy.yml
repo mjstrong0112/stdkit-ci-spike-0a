@@ -1,8 +1,14 @@
 name: stdkit static policy
 
+# Split-trust Tier-2 evaluator inspects bare Git objects only (zero checkout, zero PR-code execution).
 on:
-  pull_request_target:
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+  workflow_run: # zizmor: ignore[dangerous-triggers]
+    workflows: ["Quality Candidate"]
+    types: [completed]
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       pr:
@@ -16,201 +22,153 @@ defaults:
 
 permissions:
   contents: read
-  pull-requests: read
 
 concurrency:
-  group: stdkit-policy-static-${{ github.event.pull_request.number || inputs.pr }}
+  group: stdkit-policy-static-${{ github.event.pull_request.number || github.event.workflow_run.id || inputs.pr || github.sha }}
   cancel-in-progress: true
 
 jobs:
   static-gate:
     if: >-
       vars.STDKIT_POLICY_ENABLED == 'true' &&
-      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+      (github.event_name != 'workflow_run' || github.event.workflow_run.event == 'pull_request_review')
     runs-on: ubuntu-latest
     environment: stdkit-policy
     timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
     env:
+      EVENT_NAME: ${{ github.event_name }}
       PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       GH_REPO: ${{ github.repository }}
-      PACK_SHA256: '3ee6a5b61d47b2be77f389e4e9a844c6e882decfb128571f0801f51eb72c9d70'
     steps:
       - name: Mint dedicated publisher token
         id: app
-        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           client-id: ${{ vars.STDKIT_APP_CLIENT_ID }}
           private-key: ${{ secrets.STDKIT_APP_PRIVATE_KEY }}
           permission-checks: write
 
-      - name: Record live PR and start App check
-        id: pr
-        env:
-          GH_TOKEN: ${{ github.token }}
-          APP_TOKEN: ${{ steps.app.outputs.token }}
-        run: |
-          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || exit 1
-          gh api "repos/$GH_REPO/pulls/$PR_NUMBER" > "$RUNNER_TEMP/stdkit-pr.json"
-          head=$(jq -er --arg branch "$DEFAULT_BRANCH" \
-            'select(.state == "open" and .base.ref == $branch) | .head.sha | select(test("^[0-9a-f]{40}$"))' \
-            "$RUNNER_TEMP/stdkit-pr.json")
-          check=$(GH_TOKEN="$APP_TOKEN" gh api --method POST "repos/$GH_REPO/check-runs" \
-            -f name='stdkit-policy / static-gate' -f head_sha="$head" -f status=in_progress --jq .id)
-          [[ "$check" =~ ^[1-9][0-9]*$ ]] || exit 1
-          printf 'check=%s\n' "$check" >> "$GITHUB_OUTPUT"
-
       - name: Set up trusted Node
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '24.22.1'
+          node-version: "24.22.1"
           package-manager-cache: false
 
-      - name: Mint CLI asset read token
-        id: cli-asset
-        if: >-
-          vars.STDKIT_CLI_ARTIFACT_ID != '' &&
-          vars.STDKIT_CLI_REPO != '' &&
-          !contains(vars.STDKIT_CLI_REPO, ',') &&
-          !contains(vars.STDKIT_CLI_REPO, fromJSON('"\n"'))
-        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc
-        with:
-          client-id: ${{ vars.STDKIT_APP_CLIENT_ID }}
-          private-key: ${{ secrets.STDKIT_APP_PRIVATE_KEY }}
-          owner: ${{ vars.STDKIT_CLI_OWNER || github.repository_owner }}
-          repositories: ${{ vars.STDKIT_CLI_REPO }}
-          permission-actions: read
-
-      - name: Mint pack asset read token
-        id: pack-asset
-        if: >-
-          vars.STDKIT_PACK_ASSET_ID != '' &&
-          vars.STDKIT_PACK_REPO != '' &&
-          !contains(vars.STDKIT_PACK_REPO, ',') &&
-          !contains(vars.STDKIT_PACK_REPO, fromJSON('"\n"'))
-        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc
-        with:
-          client-id: ${{ vars.STDKIT_APP_CLIENT_ID }}
-          private-key: ${{ secrets.STDKIT_APP_PRIVATE_KEY }}
-          owner: ${{ vars.STDKIT_PACK_OWNER || github.repository_owner }}
-          repositories: ${{ vars.STDKIT_PACK_REPO }}
-          permission-contents: read
-
-      - name: Provision digest-pinned CLI and pack
-        id: provision
+      - name: Provision digest-pinned CLI, pack, and gitleaks
         env:
           CLI_URL: ${{ vars.STDKIT_CLI_URL }}
-          CLI_OWNER: ${{ vars.STDKIT_CLI_OWNER || github.repository_owner }}
-          CLI_REPO: ${{ vars.STDKIT_CLI_REPO }}
-          CLI_ARTIFACT_ID: ${{ vars.STDKIT_CLI_ARTIFACT_ID }}
-          CLI_TOKEN: ${{ steps.cli-asset.outputs.token }}
           CLI_SHA256: ${{ vars.STDKIT_CLI_SHA256 }}
           PACK_URL: ${{ vars.STDKIT_PACK_URL }}
-          PACK_OWNER: ${{ vars.STDKIT_PACK_OWNER || github.repository_owner }}
-          PACK_REPO: ${{ vars.STDKIT_PACK_REPO }}
-          PACK_ASSET_ID: ${{ vars.STDKIT_PACK_ASSET_ID }}
-          PACK_TOKEN: ${{ steps.pack-asset.outputs.token }}
           PACK_REF: ${{ vars.STDKIT_PACK_REF }}
+          PACK_SHA256: ${{ vars.STDKIT_PACK_SHA256 }}
+          GITLEAKS_URL: ${{ vars.STDKIT_GITLEAKS_URL }}
+          GITLEAKS_SHA256: ${{ vars.STDKIT_GITLEAKS_SHA256 }}
         run: |
+          [[ "$CLI_URL" == https://* ]] || exit 1
           [[ "$CLI_SHA256" =~ ^[0-9a-f]{64}$ ]] || exit 1
+          [[ "$PACK_URL" == https://* ]] || exit 1
           [[ "$PACK_REF" =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+$ ]] || exit 1
-          mkdir "$RUNNER_TEMP/stdkit"
+          [[ "$PACK_SHA256" =~ ^[0-9a-f]{64}$ ]] || exit 1
+          [[ "$GITLEAKS_URL" == https://* ]] || exit 1
+          [[ "$GITLEAKS_SHA256" =~ ^[0-9a-f]{64}$ ]] || exit 1
+          mkdir -p "$RUNNER_TEMP/stdkit/bin"
           cd "$RUNNER_TEMP/stdkit"
-          if [[ -n "$CLI_ARTIFACT_ID" ]]; then
-            [[ -z "$CLI_URL" ]] || exit 1
-            [[ "$CLI_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
-            [[ "$CLI_OWNER" =~ ^[A-Za-z0-9-]+$ ]] || exit 1
-            [[ "$CLI_REPO" =~ ^[A-Za-z0-9._-]+$ ]] || exit 1
-            [[ "$CLI_REPO" != "." && "$CLI_REPO" != ".." ]] || exit 1
-            [[ "$CLI_TOKEN" =~ ^[A-Za-z0-9_.-]+$ ]] || exit 1
-            printf 'header = "Authorization: Bearer %s"\n' "$CLI_TOKEN" | \
-              curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
-                --connect-timeout 15 --max-time 60 --max-filesize 10485760 --config - --output cli.zip \
-                "https://api.github.com/repos/$CLI_OWNER/$CLI_REPO/actions/artifacts/$CLI_ARTIFACT_ID/zip"
-            (( $(wc -c < cli.zip) <= 10485760 )) || exit 1
-            unzip -Z1 cli.zip | grep -Fx stdkit.mjs > /dev/null
-            unzip -p cli.zip stdkit.mjs | head -c 10485761 > stdkit.mjs
-            (( $(wc -c < stdkit.mjs) <= 10485760 )) || exit 1
-            rm -f cli.zip
-          else
-            [[ "$CLI_URL" == https://* ]] || exit 1
-            curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
-              --connect-timeout 15 --max-time 60 --max-filesize 10485760 --output stdkit.mjs "$CLI_URL"
-            (( $(wc -c < stdkit.mjs) <= 10485760 )) || exit 1
-          fi
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+            --connect-timeout 15 --max-time 60 --max-filesize 10485760 --output stdkit.mjs "$CLI_URL"
           printf '%s  stdkit.mjs\n' "$CLI_SHA256" | sha256sum --check
+          pack_source=$(printf '%s' "$PACK_REF" | cut -d @ -f 1)
+          node stdkit.mjs fetch --cache-dir "$PWD/cache" \
+            --pack "$PACK_REF" --sha256 "$PACK_SHA256" \
+            --sources-config "$PWD/no-sources.yaml" \
+            --pack-source "$pack_source=$PACK_URL"
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+            --connect-timeout 15 --max-time 60 --max-filesize 31457280 --output gitleaks.tar.gz "$GITLEAKS_URL"
+          printf '%s  gitleaks.tar.gz\n' "$GITLEAKS_SHA256" | sha256sum --check
+          tar -xzf gitleaks.tar.gz -C bin gitleaks
+          chmod +x bin/gitleaks
 
-          if [[ -n "$PACK_ASSET_ID" ]]; then
-            [[ -z "$PACK_URL" ]] || exit 1
-            [[ "$PACK_ASSET_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
-            [[ "$PACK_OWNER" =~ ^[A-Za-z0-9-]+$ ]] || exit 1
-            [[ "$PACK_REPO" =~ ^[A-Za-z0-9._-]+$ ]] || exit 1
-            [[ "$PACK_REPO" != "." && "$PACK_REPO" != ".." ]] || exit 1
-            [[ "$PACK_TOKEN" =~ ^[A-Za-z0-9_.-]+$ ]] || exit 1
-            mkdir -p "cache/$PACK_SHA256"
-            printf 'header = "Authorization: Bearer %s"\n' "$PACK_TOKEN" | \
-              curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
-                --connect-timeout 15 --max-time 60 --max-filesize 10485760 \
-                -H 'Accept: application/octet-stream' --config - \
-                --output "cache/$PACK_SHA256/pack.bundle.json" \
-                "https://api.github.com/repos/$PACK_OWNER/$PACK_REPO/releases/assets/$PACK_ASSET_ID"
-            (( $(wc -c < "cache/$PACK_SHA256/pack.bundle.json") <= 10485760 )) || exit 1
-            printf '%s  cache/%s/pack.bundle.json\n' "$PACK_SHA256" "$PACK_SHA256" | sha256sum --check
-          else
-            [[ "$PACK_URL" == https://* ]] || exit 1
-            pack_source=$(printf '%s' "$PACK_REF" | cut -d @ -f 1)
-            env -u CLI_TOKEN -u PACK_TOKEN node stdkit.mjs fetch --cache-dir "$PWD/cache" \
-              --pack "$PACK_REF" --sha256 "$PACK_SHA256" --sources-config "$PWD/no-sources.yaml" \
-              --pack-source "$pack_source=$PACK_URL"
-          fi
-
-      - name: Fetch candidate Git objects
-        id: fetch-pr
+      - name: Fetch candidate Git objects for target PRs
+        id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd "$RUNNER_TEMP/stdkit"
-          base=$(jq -er '.base.sha | select(test("^[0-9a-f]{40}$"))' "$RUNNER_TEMP/stdkit-pr.json")
-          head=$(jq -er '.head.sha | select(test("^[0-9a-f]{40}$"))' "$RUNNER_TEMP/stdkit-pr.json")
-          git init --bare --template= candidate.git
           auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
           printf '::add-mask::%s\n' "$auth"
-          git -C candidate.git -c "http.extraHeader=AUTHORIZATION: basic $auth" fetch --no-tags \
-            "https://github.com/$GH_REPO.git" "$base:refs/stdkit/base" "refs/pull/$PR_NUMBER/head:refs/stdkit/head"
-          test "$(git -C candidate.git rev-parse refs/stdkit/base)" = "$base"
-          test "$(git -C candidate.git rev-parse refs/stdkit/head)" = "$head"
-          cd candidate.git
-          # The pilot freezes policy expectations until an explicit trusted update.
-          git diff --quiet --no-ext-diff --no-textconv "$base" "$head" \
-            -- .standards/lock.json .github/workflows/stdkit-policy.yml
 
-      - name: Verify candidate Git objects offline
-        id: verify
-        env:
-          PACK_REF: ${{ vars.STDKIT_PACK_REF }}
-        run: |
-          base=$(jq -er '.base.sha | select(test("^[0-9a-f]{40}$"))' "$RUNNER_TEMP/stdkit-pr.json")
-          head=$(jq -er '.head.sha | select(test("^[0-9a-f]{40}$"))' "$RUNNER_TEMP/stdkit-pr.json")
-          cd "$RUNNER_TEMP/stdkit/candidate.git"
-          node ../stdkit.mjs verify "$base" --cache-dir ../cache \
-            --pack "$PACK_REF" --sha256 "$PACK_SHA256" --json > "$RUNNER_TEMP/stdkit-base-report.json"
-          node ../stdkit.mjs verify "$head" --cache-dir ../cache \
-            --pack "$PACK_REF" --sha256 "$PACK_SHA256" --json > "$RUNNER_TEMP/stdkit-report.json"
-
-      - name: Finalize the dedicated App check
-        if: always() && steps.pr.outputs.check != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          APP_TOKEN: ${{ steps.app.outputs.token }}
-          CHECK: ${{ steps.pr.outputs.check }}
-          VERIFY_RESULT: ${{ steps.verify.outcome }}
-        run: |
-          conclusion=failure
-          previous=$(jq -ce '[.base.sha, .head.sha, .base.ref, .state]' "$RUNNER_TEMP/stdkit-pr.json")
-          current=$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER" | jq -ce '[.base.sha, .head.sha, .base.ref, .state]')
-          if [[ "$VERIFY_RESULT" == success && "$current" == "$previous" ]]; then
-            conclusion=success
+          pr_list=()
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            while IFS= read -r p; do
+              [[ "$p" =~ ^[1-9][0-9]*$ ]] && pr_list+=("$p")
+            done < <(gh api --paginate --slurp "repos/$GH_REPO/pulls?state=open&base=$DEFAULT_BRANCH&per_page=100" | jq -r 'add | .[].number')
+          elif [[ "$EVENT_NAME" == "workflow_run" ]]; then
+            [[ "$RUN_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
+            gh api "repos/$GH_REPO/actions/runs/$RUN_ID" > "$RUNNER_TEMP/review-run.json"
+            pr_num=$(jq -r 'if (.pull_requests | length) == 1 then .pull_requests[0].number else "" end' "$RUNNER_TEMP/review-run.json")
+            if [[ -z "$pr_num" ]]; then
+              run_head=$(jq -er '.head_sha | select(test("^[0-9a-f]{40}$"))' "$RUNNER_TEMP/review-run.json")
+              pr_num=$(gh api --paginate --slurp "repos/$GH_REPO/pulls?state=open&base=$DEFAULT_BRANCH&per_page=100" \
+                | jq -r --arg h "$run_head" '[add[] | select(.head.sha == $h) | .number] | if length == 1 then .[0] else "" end')
+            fi
+            [[ "$pr_num" =~ ^[1-9][0-9]*$ ]] && pr_list+=("$pr_num")
+          else
+            [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || exit 1
+            pr_list+=("$PR_NUMBER")
           fi
-          GH_TOKEN="$APP_TOKEN" gh api --method PATCH "repos/$GH_REPO/check-runs/$CHECK" \
-            -f status=completed -f conclusion="$conclusion" --silent
-          test "$conclusion" = success
+
+          : > "$RUNNER_TEMP/stdkit/targets.tsv"
+          for pr in "${pr_list[@]}"; do
+            gh api "repos/$GH_REPO/pulls/$pr" > "$RUNNER_TEMP/pr-$pr.json"
+            state=$(jq -er '.state' "$RUNNER_TEMP/pr-$pr.json")
+            base_ref=$(jq -er '.base.ref' "$RUNNER_TEMP/pr-$pr.json")
+            [[ "$state" == "open" && "$base_ref" == "$DEFAULT_BRANCH" ]] || continue
+            base=$(jq -er '.base.sha | select(test("^[0-9a-f]{40}$"))' "$RUNNER_TEMP/pr-$pr.json")
+            head=$(jq -er '.head.sha | select(test("^[0-9a-f]{40}$"))' "$RUNNER_TEMP/pr-$pr.json")
+            rm -rf "$RUNNER_TEMP/stdkit/pr-$pr.git"
+            git init --bare --template= "$RUNNER_TEMP/stdkit/pr-$pr.git"
+            git -C "$RUNNER_TEMP/stdkit/pr-$pr.git" -c "http.extraHeader=AUTHORIZATION: basic $auth" \
+              fetch --no-tags "https://github.com/$GH_REPO.git" \
+              "$base:refs/stdkit/base" "refs/pull/$pr/head:refs/stdkit/head"
+            printf '%s\t%s\t%s\n' "$pr" "$base" "$head" >> "$RUNNER_TEMP/stdkit/targets.tsv"
+          done
+
+      - name: Run static evaluator and publish App check
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          STDKIT_APP_TOKEN: ${{ steps.app.outputs.token }}
+          PACK_REF: ${{ vars.STDKIT_PACK_REF }}
+          PACK_SHA256: ${{ vars.STDKIT_PACK_SHA256 }}
+        run: |
+          cd "$RUNNER_TEMP/stdkit"
+          gitleaks_bin="$PWD/bin/gitleaks"
+          test -x "$gitleaks_bin"
+          rc=0
+          while IFS=$'\t' read -r pr base head; do
+            [[ -n "$pr" ]] || continue
+            (
+              cd "$RUNNER_TEMP/stdkit/pr-$pr.git"
+              node ../stdkit.mjs doctor --ci --phase static \
+                --base "$base" --head "$head" --pr "$pr" --repo "$GH_REPO" \
+                --publish-check --gitleaks --gitleaks-bin "$gitleaks_bin" \
+                --cache-dir ../cache --pack "$PACK_REF" --sha256 "$PACK_SHA256" \
+                --report "$RUNNER_TEMP/stdkit-static-report-$pr.json" \
+                --summary "$GITHUB_STEP_SUMMARY" --json
+            ) || rc=1
+          done < "$RUNNER_TEMP/stdkit/targets.tsv"
+          exit "$rc"
+
+      - name: Upload trusted static report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: stdkit-static-report
+          path: ${{ runner.temp }}/stdkit-static-report-*.json
+          if-no-files-found: ignore
+          retention-days: 30

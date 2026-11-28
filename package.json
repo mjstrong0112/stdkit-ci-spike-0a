@@ -1,0 +1,17 @@
+{
+  "name": "stdkit-ci-spike-0a",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.29.0",
+  "engines": { "node": ">=24.22.1 <25.0.0" },
+  "scripts": {
+    "lint": "node --check src/message.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/message.test.mjs",
+    "knip": "knip"
+  },
+  "devDependencies": {
+    "knip": "6.48.0",
+    "typescript": "5.9.3"
+  }
+}

@@ -2,6 +2,8 @@ The code, tests, and checks are the source of truth. If this file disagrees with
 
 # Agent guidance
 
+Precedence: code and checks, then accepted ADRs, then this file, then plans and tickets.
+
 <!-- stdkit:begin team-guidance -->
 ## Team standards
 

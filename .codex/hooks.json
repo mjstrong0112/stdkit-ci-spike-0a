@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "dir=\"$PWD\"; while [ ! -e \"$dir/.git\" ]; do [ \"$dir\" != / ] || exit 2; dir=${dir%/*}; dir=${dir:-/}; done; exec node \"$dir/scripts/agent-guard.mjs\" codex"
+          }
+        ]
+      }
+    ]
+  }
+}

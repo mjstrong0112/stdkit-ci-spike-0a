@@ -1,0 +1,10 @@
+{
+  "stdkit-guard": {
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "command": "node ../scripts/agent-guard.mjs antigravity"
+      }
+    ]
+  }
+}

@@ -1,0 +1,7 @@
+# Hardened pnpm 11 workspace policy (R17, V4).
+minimumReleaseAge: 4320
+trustPolicy: no-downgrade
+blockExoticSubdeps: true
+trustLockfile: false
+strictDepBuilds: true
+allowBuilds: {}

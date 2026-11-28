@@ -1,0 +1,9 @@
+# stdkit guard backstop for matching command prefixes
+prefix_rule(pattern = ["git","commit","--no-verify"], decision = "forbidden")
+prefix_rule(pattern = ["git","commit","-n"], decision = "forbidden")
+prefix_rule(pattern = ["git","push","--no-verify"], decision = "forbidden")
+prefix_rule(pattern = ["git","push","--mirror"], decision = "forbidden")
+prefix_rule(pattern = ["npm","publish"], decision = "forbidden")
+prefix_rule(pattern = ["pnpm","publish"], decision = "forbidden")
+prefix_rule(pattern = ["yarn","publish"], decision = "forbidden")
+prefix_rule(pattern = ["yarn","npm","publish"], decision = "forbidden")

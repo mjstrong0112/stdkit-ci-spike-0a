@@ -1,0 +1,19 @@
+* @mjstrong0112
+
+# stdkit:begin trust-surfaces
+# Managed by stdkit — do not edit manually.
+/.standards/** @mjstrong0112
+/AGENTS.md @mjstrong0112
+/CLAUDE.md @mjstrong0112
+/.claude/settings.json @mjstrong0112
+/.codex/** @mjstrong0112
+/.agents/** @mjstrong0112
+/scripts/agent-guard.mjs @mjstrong0112
+/.github/workflows/** @mjstrong0112
+/.github/CODEOWNERS @mjstrong0112
+/quality-baseline.json @mjstrong0112
+/package.json @mjstrong0112
+/pnpm-lock.yaml @mjstrong0112
+/pnpm-workspace.yaml @mjstrong0112
+/.npmrc @mjstrong0112
+# stdkit:end trust-surfaces

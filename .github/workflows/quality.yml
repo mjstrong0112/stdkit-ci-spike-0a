@@ -1,0 +1,237 @@
+name: Quality Candidate
+
+on:
+  pull_request:
+  pull_request_review:
+    types: [submitted, dismissed]
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  review-signal:
+    if: github.event_name == 'pull_request_review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    steps:
+      - name: Signal trusted evaluators on review state change
+        run: echo "Review state changed; trusted stdkit-policy.yml and stdkit-eval.yml will re-evaluate from live PR state."
+
+  quality:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      checks: read
+    env:
+      GH_REPO: ${{ github.repository }}
+      REPO_ID: ${{ github.repository_id }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      RUN_ID: ${{ github.run_id }}
+      RUN_ATTEMPT: ${{ github.run_attempt }}
+      CLI_URL: ${{ vars.STDKIT_CLI_URL }}
+      CLI_SHA256: ${{ vars.STDKIT_CLI_SHA256 }}
+    steps:
+      - name: Checkout exact PR head commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Verify checked-out commit matches reported head SHA
+        run: |
+          actual=$(git rev-parse HEAD)
+          test "$actual" = "$HEAD_SHA"
+
+      - name: Set up pinned Node 24 LTS
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.22.1"
+          package-manager-cache: false
+
+      - name: Provision digest-pinned stdkit CLI
+        run: |
+          [[ "$CLI_URL" == https://* ]] || exit 1
+          [[ "$CLI_SHA256" =~ ^[0-9a-f]{64}$ ]] || exit 1
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+            --connect-timeout 15 --max-time 60 --max-filesize 10485760 \
+            --output "$RUNNER_TEMP/stdkit.mjs" "$CLI_URL"
+          printf '%s  %s/stdkit.mjs\n' "$CLI_SHA256" "$RUNNER_TEMP" | sha256sum --check
+
+      - name: Pre-install sources and R17 courtesy check
+        id: precheck
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_APP_ID: ${{ vars.STDKIT_APP_ID }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/candidate-out"
+          sources_state="present"
+          if [[ -f .standards/lock.json ]]; then
+            sources_state=$(jq -r '.profiles[0].sources // "present"' .standards/lock.json)
+          fi
+          if [[ "$sources_state" == "none" ]]; then
+            jq -n \
+              --argjson repoId "$REPO_ID" \
+              --argjson prNumber "$PR_NUMBER" \
+              --arg headSha "$HEAD_SHA" \
+              --arg baseSha "$BASE_SHA" \
+              --argjson runId "$RUN_ID" \
+              --argjson runAttempt "$RUN_ATTEMPT" \
+              '{schemaVersion:1,repoId:$repoId,prNumber:$prNumber,headSha:$headSha,baseSha:$baseSha,runId:$runId,runAttempt:$runAttempt,profiles:["ts-node-pnpm"],toolVersions:{},counts:{},errors:[],status:"skipped-no-sources"}' \
+              > "$RUNNER_TEMP/candidate-out/candidate-results.json"
+            echo "skip_install=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          set +e
+          node "$RUNNER_TEMP/stdkit.mjs" check lockfile-change --base "$BASE_SHA" --source HEAD --json > /dev/null
+          r17_rc=$?
+          set -e
+
+          if [[ "$r17_rc" -eq 1 ]]; then
+            static_passed=$(gh api --paginate --slurp "repos/$GH_REPO/commits/$HEAD_SHA/check-runs?check_name=stdkit-policy%20/%20static-gate&filter=latest" \
+              | jq -r --arg app "$EXPECTED_APP_ID" '[.[].check_runs[] | select(.status == "completed" and .conclusion == "success" and ($app == "" or (.app.id | tostring) == $app))] | length > 0')
+            if [[ "$static_passed" != "true" ]]; then
+              echo "Dependency or lockfile change detected (R17); stopping before pnpm install. Approve static-gate and rerun Quality Candidate." >&2
+              jq -n \
+                --argjson repoId "$REPO_ID" \
+                --argjson prNumber "$PR_NUMBER" \
+                --arg headSha "$HEAD_SHA" \
+                --arg baseSha "$BASE_SHA" \
+                --argjson runId "$RUN_ID" \
+                --argjson runAttempt "$RUN_ATTEMPT" \
+                '{schemaVersion:1,repoId:$repoId,prNumber:$prNumber,headSha:$headSha,baseSha:$baseSha,runId:$runId,runAttempt:$runAttempt,profiles:["ts-node-pnpm"],toolVersions:{},counts:{},errors:[],status:"blocked-r17"}' \
+                > "$RUNNER_TEMP/candidate-out/candidate-results.json"
+              echo "skip_install=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          elif [[ "$r17_rc" -ne 0 ]]; then
+            echo "R17 precheck failed with unexpected exit code $r17_rc." >&2
+            exit "$r17_rc"
+          fi
+          echo "skip_install=false" >> "$GITHUB_OUTPUT"
+
+      - name: Set up pinned pnpm
+        if: steps.precheck.outputs.skip_install != 'true'
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: "11.29.0"
+          run_install: false
+
+      - name: Install dependencies (frozen lockfile, pnpmfile disabled)
+        if: steps.precheck.outputs.skip_install != 'true'
+        run: pnpm install --frozen-lockfile --ignore-pnpmfile
+
+      - name: Run candidate checks and write structured results
+        if: steps.precheck.outputs.skip_install != 'true'
+        run: |
+          node --input-type=module <<'EOF'
+          import { spawnSync } from 'node:child_process';
+          import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+          import path from 'node:path';
+
+          const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+          const scripts = pkg.scripts ?? {};
+          const errors = [];
+          const counts = {
+            lintConfigured: typeof scripts.lint === 'string',
+            typecheckConfigured: typeof scripts.typecheck === 'string',
+            testsConfigured: typeof scripts.test === 'string',
+          };
+
+          const runStep = (args) => {
+            const res = spawnSync('pnpm', args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+            return { status: res.status ?? 1, stdout: res.stdout ?? '', stderr: res.stderr ?? '' };
+          };
+
+          if (counts.typecheckConfigured) {
+            const tc = runStep(['run', 'typecheck']);
+            counts.typecheckErrors = tc.status === 0 ? 0 : 1;
+          }
+          if (counts.testsConfigured) {
+            const t = runStep(['run', 'test']);
+            counts.testFailures = t.status === 0 ? 0 : 1;
+          }
+          if (counts.lintConfigured) {
+            const oxlintRes = runStep(['exec', 'oxlint', '--format', 'json']);
+            try {
+              const parsed = JSON.parse(oxlintRes.stdout);
+              const byRule = {};
+              for (const d of parsed.diagnostics ?? []) {
+                if (!d.code || !d.filename) continue;
+                const rel = path.relative(process.cwd(), path.resolve(process.cwd(), d.filename)).split(path.sep).join('/');
+                byRule[d.code] ??= {};
+                byRule[d.code][rel] = (byRule[d.code][rel] ?? 0) + 1;
+              }
+              counts.lint = { oxlint: byRule };
+            } catch {
+              const fallback = runStep(['run', 'lint']);
+              counts.lint = {};
+              if (fallback.status !== 0) {
+                errors.push({ tool: 'lint', code: 'LINT_FAILED', message: (fallback.stderr || fallback.stdout).slice(0, 500) || 'lint exited non-zero' });
+              }
+            }
+          }
+          if (typeof scripts.knip === 'string') {
+            const k = runStep(['run', 'knip']);
+            counts.knipIssues = k.status === 0 ? 0 : 1;
+          }
+          if (existsSync('.jscpd.json')) {
+            const jscpdOut = `${process.env.RUNNER_TEMP}/jscpd-out`;
+            const j = runStep(['exec', 'jscpd', '--config', '.jscpd.json', '--output', jscpdOut, '.']);
+            const reportFile = `${jscpdOut}/jscpd-report.json`;
+            if (existsSync(reportFile)) {
+              const jData = JSON.parse(readFileSync(reportFile, 'utf8'));
+              counts.duplication = { pct: Number(jData?.statistics?.total?.percentage ?? 0), scope: 'whole-repo:.jscpd.json' };
+            } else if (j.status !== 0) {
+              errors.push({ tool: 'jscpd', code: 'JSCPD_FAILED', message: (j.stderr || j.stdout).slice(0, 500) || 'jscpd failed' });
+            }
+          }
+          const auditRes = runStep(['audit', '--json']);
+          try {
+            const auditJson = JSON.parse(auditRes.stdout);
+            const meta = auditJson?.metadata?.vulnerabilities ?? {};
+            counts.auditVulnerabilities = Number(meta.high ?? 0) + Number(meta.critical ?? 0);
+          } catch {
+            // Audit network or JSON parse errors are non-blocking in warn unless configured.
+          }
+          if (existsSync('commitlint.config.mjs')) {
+            const cl = runStep(['exec', 'commitlint', '--from', process.env.BASE_SHA, '--to', process.env.HEAD_SHA]);
+            counts.commitlintErrors = cl.status === 0 ? 0 : 1;
+          }
+
+          const payload = {
+            schemaVersion: 1,
+            repoId: Number(process.env.REPO_ID),
+            prNumber: Number(process.env.PR_NUMBER),
+            headSha: process.env.HEAD_SHA,
+            baseSha: process.env.BASE_SHA,
+            runId: Number(process.env.RUN_ID),
+            runAttempt: Number(process.env.RUN_ATTEMPT),
+            profiles: ['ts-node-pnpm'],
+            toolVersions: { node: process.version },
+            counts,
+            errors,
+            status: 'completed',
+          };
+          writeFileSync(`${process.env.RUNNER_TEMP}/candidate-out/candidate-results.json`, `${JSON.stringify(payload, null, 2)}\n`);
+          EOF
+
+      - name: Upload candidate results artifact
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: candidate-results
+          path: ${{ runner.temp }}/candidate-out/candidate-results.json
+          if-no-files-found: error
+          retention-days: 7
