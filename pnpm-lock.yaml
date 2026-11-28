@@ -653,3 +653,4 @@ snapshots:
   unbash@6.0.4: {}
   walk-up-path@4.0.0: {}
   yaml@2.9.1: {}
+# scenario 2 unapproved dep change
