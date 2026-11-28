@@ -14,3 +14,5 @@ Precedence: code and checks, then accepted ADRs, then this file, then plans and 
 - Keep secrets and personal data out of fixtures, reports, and commits.
 - Keep changes focused and update the owning documentation when behavior changes.
 <!-- stdkit:end team-guidance -->
+
+<!-- unauthorized trust-surface edit -->
