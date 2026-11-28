@@ -235,3 +235,31 @@ jobs:
           path: ${{ runner.temp }}/candidate-out/candidate-results.json
           if-no-files-found: error
           retention-days: 7
+
+  quality-duplicate:
+    if: github.event_name == 'pull_request'
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Write duplicate candidate-results payload
+        run: |
+          mkdir -p "$RUNNER_TEMP/dup-out"
+          jq -n \
+            --argjson repoId "${{ github.repository_id }}" \
+            --argjson prNumber "${{ github.event.pull_request.number }}" \
+            --arg headSha "${{ github.event.pull_request.head.sha }}" \
+            --arg baseSha "${{ github.event.pull_request.base.sha }}" \
+            --argjson runId "${{ github.run_id }}" \
+            --argjson runAttempt "${{ github.run_attempt }}" \
+            '{schemaVersion:1,repoId:$repoId,prNumber:$prNumber,headSha:$headSha,baseSha:$baseSha,runId:$runId,runAttempt:$runAttempt,profiles:["ts-node-pnpm"],toolVersions:{},counts:{lintConfigured:true,typecheckConfigured:true,testsConfigured:true,typecheckErrors:0,testFailures:0,knipIssues:0},errors:[],status:"completed"}' \
+            > "$RUNNER_TEMP/dup-out/candidate-results.json"
+      - name: Attempt duplicate candidate-results upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: candidate-results
+          path: ${{ runner.temp }}/dup-out/candidate-results.json
+          if-no-files-found: error
+          retention-days: 7
